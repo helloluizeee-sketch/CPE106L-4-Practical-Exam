@@ -1,108 +1,101 @@
 import tkinter as tk
-import sqlite3
-import re
+import database 
 
 class CourierTrackingApp:
     """
     Main application class for the FastTrack Courier System.
-    Handles the user-friendly interface, database connection, and search functionality.
+    Handles the user-friendly interface and connects to the backend database.
     """
     def __init__(self, root):
         self.root = root
         self.root.title("FastTrack Courier Tracking")
-        self.root.geometry("400x300")
+        self.root.geometry("500x450")
         self.root.configure(padx=20, pady=20)
 
-        # Initialize local database for the submission requirement
-        self.setup_database()
-
-        # Construct the UI components
         self.build_ui()
-
-    def setup_database(self):
-        """
-        Initializes a local SQLite database and populates it with sample data
-        to execute the minimum testing use cases.
-        """
-        self.conn = sqlite3.connect("courier_tracking.db")
-        self.cursor = self.conn.cursor()
-        
-        # Create the tracking table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS parcels (
-                order_id TEXT PRIMARY KEY,
-                status TEXT,
-                location TEXT
-            )
-        ''')
-        
-        # Insert sample data for Use Case 1 (Successful Search)
-        self.cursor.execute("INSERT OR IGNORE INTO parcels VALUES ('ORD1001', 'In Transit', 'Manila Sorting Hub')")
-        self.cursor.execute("INSERT OR IGNORE INTO parcels VALUES ('ORD1002', 'Out for Delivery', 'Las Piñas Branch')")
-        self.conn.commit()
 
     def build_ui(self):
         """
         Constructs the user interface elements required for the search function.
         """
-        # Header 
-        title_label = tk.Label(self.root, text="Courier Tracking Portal", font=("Helvetica", 16, "bold"))
-        title_label.pack(pady=(0, 20))
+        # Header
+        tk.Label(self.root, text="FastTrack Courier Portal", font=("Helvetica", 16, "bold")).pack(pady=(0, 15))
 
-        # Search Bar Frame
+        # Search Frame
         input_frame = tk.Frame(self.root)
         input_frame.pack(fill="x", pady=5)
 
         tk.Label(input_frame, text="Order ID:", font=("Helvetica", 12)).pack(side="left")
         self.entry_order_id = tk.Entry(input_frame, font=("Helvetica", 12))
         self.entry_order_id.pack(side="left", fill="x", expand=True, padx=10)
-
+        
         # Search Button
         search_btn = tk.Button(self.root, text="Track Parcel", command=self.track_parcel, bg="#4CAF50", fg="white", font=("Helvetica", 12, "bold"))
-        search_btn.pack(pady=15, fill="x")
+        search_btn.pack(pady=10, fill="x")
 
-        # Dynamic Status Display Area
-        self.result_label = tk.Label(self.root, text="Enter an Order ID to begin.", font=("Helvetica", 11), fg="gray", justify="center")
-        self.result_label.pack(pady=10)
+        # Dynamic Status / Error Label
+        self.status_label = tk.Label(self.root, text="Format: ORD-XXXXXX (e.g., ORD-000001)", font=("Helvetica", 10), fg="gray")
+        self.status_label.pack(pady=5)
 
-    def validate_input(self, order_id):
-        """
-        Executes data validation to ensure user input meets system requirements.
-        Rejects empty strings or entries containing special characters.
-        """
-        if not order_id:
-            return False, "Error: Order ID cannot be empty."
-        
-        # Enforce alphanumeric format using regular expressions
-        if not re.match(r"^[A-Za-z0-9]+$", order_id):
-            return False, "Error: Invalid format. Use alphanumeric characters only."
-        
-        return True, "Valid"
+        # Scrollable text area for the tracking timeline
+        self.result_text = tk.Text(self.root, height=12, width=50, font=("Courier", 10), state="disabled", bg="#f4f4f4")
+        self.result_text.pack(pady=10, fill="both", expand=True)
 
     def track_parcel(self):
         """
-        Executes the search function based on the validated Order ID.
-        Updates the UI with the parcel status or an appropriate error prompt.
+        Executes the search function using the imported database module.
+        Retrieves the timeline and displays it in the text area.
         """
-        order_id = self.entry_order_id.get().strip()
+        order_id = self.entry_order_id.get().strip().upper()
 
-        # Fulfills Use Case 2: Data Validation Failure
-        is_valid, validation_msg = self.validate_input(order_id)
-        if not is_valid:
-            self.result_label.config(text=validation_msg, fg="red")
+        # Reset display
+        self.result_text.config(state="normal")
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.config(state="disabled")
+
+        if not order_id:
+            self.status_label.config(text="Error: Please enter an Order ID.", fg="red")
             return
 
-        # Fulfills Use Case 1 & 3: Executing Database Search
-        self.cursor.execute("SELECT status, location FROM parcels WHERE order_id = ?", (order_id.upper(),))
-        result = self.cursor.fetchone()
-
-        if result:
-            # Fulfills Use Case 1: Successful Search
-            status, location = result
-            self.result_label.config(text=f"Status: {status}\nCurrent Location: {location}", fg="green")
-        else:
+        try:
             # Fulfills Use Case 3: Order ID Not Found
-            self.result_label.config(text="Tracking Number Not Found in database.", fg="orange")
+            order_details = database.get_order(order_id)
+            if not order_details:
+                self.status_label.config(text=f"Tracking Number Not Found in database.", fg="orange")
+                return
+
+            # Fulfills Use Case 1: Successful Search
+            history = database.get_tracking_history(order_id)
+            self.status_label.config(text="Search Successful!", fg="green")
+
+            # Build the timeline display
+            output = f"Order ID : {order_details['order_id']}\n"
+            output += f"Sender   : {order_details['sender_name']}\n"
+            output += f"Receiver : {order_details['receiver_name']}\n"
+            output += f"Status   : {order_details['current_status']}\n"
+            output += "-" * 45 + "\n"
+            output += "TRACKING TIMELINE:\n"
+            
+            if not history:
+                output += "No tracking events recorded yet.\n"
+            else:
+                for event in history:
+                    output += f"[{event['timestamp']}]\n"
+                    output += f"{event['status']} - {event['location']}\n"
+                    if event['remarks']:
+                        output += f"Note: {event['remarks']}\n"
+                    output += "\n"
+
+            # Render text to UI
+            self.result_text.config(state="normal")
+            self.result_text.insert(tk.END, output)
+            self.result_text.config(state="disabled")
+
+        except ValueError as e:
+            # Fulfills Use Case 2: Data Validation Failure (Catches errors raised in database.py)
+            self.status_label.config(text=str(e), fg="red")
+        except Exception as e:
+            self.status_label.config(text=f"System Error: Check if fasttrack.db is initialized.", fg="red")
 
 if __name__ == "__main__":
     root = tk.Tk()
